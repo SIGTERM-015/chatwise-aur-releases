@@ -1,0 +1,13 @@
+# Archivos temporales del script
+*.deb
+*.pkg.tar.zst
+.update_status
+aur-repo/
+
+# Directorios de build
+src/
+pkg/
+
+# Archivos de log
+*.log
+

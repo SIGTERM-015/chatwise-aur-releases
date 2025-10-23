@@ -1,0 +1,124 @@
+name: Update AUR Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to update to'
+        required: true
+        type: string
+      sha256:
+        description: 'SHA256 checksum of the .deb file'
+        required: true
+        type: string
+  
+jobs:
+  update-aur:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+          
+      - name: Setup SSH for AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          EOF
+          
+      - name: Configure git
+        run: |
+          git config --global user.name "SIGTERM"
+          git config --global user.email "me@sigterm.vodka"
+          
+      - name: Update package files
+        env:
+          NEW_VERSION: ${{ inputs.version }}
+          NEW_SHA256: ${{ inputs.sha256 }}
+        run: |
+          set -e
+          
+          REPO_OWNER="egoist"
+          REPO_NAME="chatwise-releases"
+          PACKAGE_NAME="chatwise"
+          AUR_REPO="ssh://aur@aur.archlinux.org/chatwise.git"
+          
+          echo "📝 Actualizando PKGBUILD a versión ${NEW_VERSION}..."
+          sed -i "s/^pkgver=.*/pkgver=${NEW_VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('${NEW_SHA256}')/" PKGBUILD
+          
+          echo "📝 Generando .SRCINFO..."
+          cat > .SRCINFO <<EOF
+          pkgbase = ${PACKAGE_NAME}
+          	pkgdesc = The second fastest AI chatbot
+          	pkgver = ${NEW_VERSION}
+          	pkgrel = 1
+          	url = https://chatwise.app/
+          	arch = x86_64
+          	license = LicenseRef-proprietary
+          	depends = cairo
+          	depends = gdk-pixbuf2
+          	depends = glib2
+          	depends = gtk3
+          	depends = hicolor-icon-theme
+          	depends = libsoup
+          	depends = pango
+          	depends = webkit2gtk-4.1
+          	depends = openssl
+          	depends = libappindicator-gtk3
+          	options = !strip
+          	options = !debug
+          	source = https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${NEW_VERSION}/ChatWise_${NEW_VERSION}_amd64.deb
+          	sha256sums = ${NEW_SHA256}
+          
+          pkgname = ${PACKAGE_NAME}
+          EOF
+          
+          echo "✅ Archivos actualizados"
+          
+      - name: Commit to GitHub
+        run: |
+          if git diff --quiet; then
+              echo "✅ No hay cambios en GitHub"
+          else
+              git add PKGBUILD .SRCINFO
+              git commit -m "Update to version ${{ inputs.version }}"
+              git push origin main || git push origin master
+              echo "✅ Cambios guardados en GitHub"
+          fi
+          
+      - name: Push to AUR
+        run: |
+          set -e
+          
+          AUR_REPO="ssh://aur@aur.archlinux.org/chatwise.git"
+          
+          echo "📥 Clonando repositorio AUR..."
+          git clone "$AUR_REPO" aur-repo
+          
+          cd aur-repo
+          
+          cp ../PKGBUILD .
+          cp ../.SRCINFO .
+          
+          if git diff --quiet; then
+              echo "✅ No hay cambios para el AUR"
+              exit 0
+          fi
+          
+          echo "📤 Publicando cambios al AUR..."
+          git add PKGBUILD .SRCINFO
+          git commit -m "Update to version ${{ inputs.version }}"
+          git push origin master
+          
+          echo "✨ ¡Paquete publicado en AUR versión ${{ inputs.version }}!"
+

@@ -1,0 +1,83 @@
+name: Check for New Release
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+  
+jobs:
+  check-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Check for new release
+        id: check
+        run: |
+          set -e
+          
+          REPO_OWNER="egoist"
+          REPO_NAME="chatwise-releases"
+          
+          echo "🔍 Checking for new releases..."
+          
+          LATEST_RELEASE=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest")
+          LATEST_VERSION=$(echo "$LATEST_RELEASE" | jq -r '.tag_name' | sed 's/^v//')
+          
+          if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
+              echo "❌ Error: No se pudo obtener la última versión"
+              exit 1
+          fi
+          
+          echo "📦 Última versión en GitHub: $LATEST_VERSION"
+          
+          CURRENT_VERSION=$(grep "^pkgver=" PKGBUILD | cut -d'=' -f2)
+          echo "📦 Versión actual en AUR: $CURRENT_VERSION"
+          
+          if [ "$LATEST_VERSION" == "$CURRENT_VERSION" ]; then
+              echo "✅ El paquete ya está actualizado"
+              echo "update_needed=false" >> $GITHUB_OUTPUT
+              exit 0
+          fi
+          
+          echo "🚀 Nueva versión detectada: $LATEST_VERSION"
+          echo "📥 Descargando para obtener checksum..."
+          
+          DEB_URL="https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${LATEST_VERSION}/ChatWise_${LATEST_VERSION}_amd64.deb"
+          DEB_FILE="ChatWise_${LATEST_VERSION}_amd64.deb"
+          
+          wget -q "$DEB_URL" -O "$DEB_FILE"
+          
+          if [ ! -f "$DEB_FILE" ]; then
+              echo "❌ Error: No se pudo descargar el archivo .deb"
+              exit 1
+          fi
+          
+          echo "🔐 Calculando checksum..."
+          NEW_SHA256=$(sha256sum "$DEB_FILE" | awk '{print $1}')
+          echo "SHA256: $NEW_SHA256"
+          
+          rm "$DEB_FILE"
+          
+          echo "update_needed=true" >> $GITHUB_OUTPUT
+          echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "sha256=$NEW_SHA256" >> $GITHUB_OUTPUT
+          
+      - name: Trigger update workflow
+        if: steps.check.outputs.update_needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          SHA256="${{ steps.check.outputs.sha256 }}"
+          
+          echo "🚀 Invocando workflow de actualización para versión $VERSION"
+          
+          gh workflow run update-aur.yml \
+            -f version="$VERSION" \
+            -f sha256="$SHA256"
+          
+          echo "✅ Workflow de actualización iniciado"
+
