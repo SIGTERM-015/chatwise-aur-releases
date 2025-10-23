@@ -24,6 +24,9 @@ on:
     secrets:
       AUR_SSH_PRIVATE_KEY:
         required: true
+
+permissions:
+  contents: write
   
 jobs:
   update-aur:
@@ -105,8 +108,11 @@ jobs:
           else
               git add PKGBUILD .SRCINFO
               git commit -m "Update to version ${{ inputs.version }}"
-              git push origin main || git push origin master
-              echo "✅ Cambios guardados en GitHub"
+              
+              # Detectar el branch actual y hacer push
+              CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+              git push origin "$CURRENT_BRANCH"
+              echo "✅ Cambios guardados en GitHub (branch: $CURRENT_BRANCH)"
           fi
           
       - name: Push to AUR
