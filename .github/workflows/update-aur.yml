@@ -11,6 +11,19 @@ on:
         description: 'SHA256 checksum of the .deb file'
         required: true
         type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to update to'
+        required: true
+        type: string
+      sha256:
+        description: 'SHA256 checksum of the .deb file'
+        required: true
+        type: string
+    secrets:
+      AUR_SSH_PRIVATE_KEY:
+        required: true
   
 jobs:
   update-aur:

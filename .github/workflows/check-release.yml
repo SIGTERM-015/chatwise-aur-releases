@@ -8,6 +8,10 @@ on:
 jobs:
   check-release:
     runs-on: ubuntu-latest
+    outputs:
+      update_needed: ${{ steps.check.outputs.update_needed }}
+      version: ${{ steps.check.outputs.version }}
+      sha256: ${{ steps.check.outputs.sha256 }}
     
     steps:
       - name: Checkout repository
@@ -65,19 +69,13 @@ jobs:
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
           echo "sha256=$NEW_SHA256" >> $GITHUB_OUTPUT
           
-      - name: Trigger update workflow
-        if: steps.check.outputs.update_needed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${{ steps.check.outputs.version }}"
-          SHA256="${{ steps.check.outputs.sha256 }}"
-          
-          echo "🚀 Invocando workflow de actualización para versión $VERSION"
-          
-          gh workflow run update-aur.yml \
-            -f version="$VERSION" \
-            -f sha256="$SHA256"
-          
-          echo "✅ Workflow de actualización iniciado"
+  call-update-workflow:
+    needs: check-release
+    if: needs.check-release.outputs.update_needed == 'true'
+    uses: ./.github/workflows/update-aur.yml
+    with:
+      version: ${{ needs.check-release.outputs.version }}
+      sha256: ${{ needs.check-release.outputs.sha256 }}
+    secrets:
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
 
