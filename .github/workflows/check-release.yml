@@ -75,6 +75,8 @@ jobs:
   call-update-workflow:
     needs: check-release
     if: needs.check-release.outputs.update_needed == 'true'
+    permissions:
+      contents: write
     uses: ./.github/workflows/update-aur.yml
     with:
       version: ${{ needs.check-release.outputs.version }}
