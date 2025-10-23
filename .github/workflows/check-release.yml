@@ -81,6 +81,5 @@ jobs:
     with:
       version: ${{ needs.check-release.outputs.version }}
       sha256: ${{ needs.check-release.outputs.sha256 }}
-    secrets:
-      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    secrets: inherit
 

@@ -21,9 +21,6 @@ on:
         description: 'SHA256 checksum of the .deb file'
         required: true
         type: string
-    secrets:
-      AUR_SSH_PRIVATE_KEY:
-        required: true
 
 permissions:
   contents: write
@@ -35,20 +32,45 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      
+      - name: Verify secret is available
+        run: |
+          if [ -z "${{ secrets.AUR_SSH_PRIVATE_KEY }}" ]; then
+            echo "❌ ERROR: AUR_SSH_PRIVATE_KEY secret is not available!"
+            exit 1
+          else
+            echo "✅ AUR_SSH_PRIVATE_KEY secret is available"
+          fi
           
       - name: Setup SSH for AUR
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Guardar la clave SSH (preservando saltos de línea)
           echo "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
+          
+          # Agregar host conocido
           ssh-keyscan -H aur.archlinux.org >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          
+          # Configurar SSH
           cat > ~/.ssh/config <<EOF
           Host aur.archlinux.org
             IdentityFile ~/.ssh/aur
             User aur
+            StrictHostKeyChecking no
           EOF
+          chmod 600 ~/.ssh/config
+          
+          # Verificar que la clave se guardó correctamente
+          echo "🔍 Verificando configuración SSH..."
+          ls -la ~/.ssh/
+          echo "🔑 Primeras líneas de la clave:"
+          head -n 1 ~/.ssh/aur
           
       - name: Configure git
         run: |
