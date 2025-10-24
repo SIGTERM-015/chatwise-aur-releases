@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   
 jobs:
   check-release:
@@ -19,6 +19,60 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      
+      - name: Sync with AUR if needed
+        run: |
+          set -e
+          
+          AUR_PACKAGE="chatwise"
+          
+          echo "🔍 Checking synchronization with AUR..."
+          
+          # Get local version
+          LOCAL_VERSION=$(grep "^pkgver=" PKGBUILD | cut -d'=' -f2)
+          echo "📦 Local version: $LOCAL_VERSION"
+          
+          # Get AUR version
+          AUR_INFO=$(curl -s "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=${AUR_PACKAGE}")
+          AUR_VERSION=$(echo "$AUR_INFO" | jq -r '.results[0].Version' | cut -d'-' -f1)
+          
+          if [ -z "$AUR_VERSION" ] || [ "$AUR_VERSION" == "null" ]; then
+              echo "⚠️  Warning: Could not get AUR version, continuing with local version"
+              exit 0
+          fi
+          
+          echo "📦 AUR version: $AUR_VERSION"
+          
+          # Compare versions using sort -V (version sort)
+          HIGHER_VERSION=$(printf "%s\n%s" "$LOCAL_VERSION" "$AUR_VERSION" | sort -V | tail -n1)
+          
+          if [ "$AUR_VERSION" == "$HIGHER_VERSION" ] && [ "$AUR_VERSION" != "$LOCAL_VERSION" ]; then
+              echo "🔄 AUR version ($AUR_VERSION) is higher than local ($LOCAL_VERSION)"
+              echo "📥 Syncing with AUR..."
+              
+              # Clone AUR repository to temporary directory
+              git clone "https://aur.archlinux.org/${AUR_PACKAGE}.git" /tmp/aur-sync
+              
+              # Copy files from AUR to local repository
+              cp /tmp/aur-sync/PKGBUILD ./PKGBUILD
+              cp /tmp/aur-sync/.SRCINFO ./.SRCINFO 2>/dev/null || true
+              
+              # Clean up
+              rm -rf /tmp/aur-sync
+              
+              # Configure git
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              
+              # Commit and push
+              git add PKGBUILD .SRCINFO
+              git commit -m "chore: sync with AUR version $AUR_VERSION"
+              git push
+              
+              echo "✅ Synchronization completed"
+          else
+              echo "✅ Local repository is synchronized with AUR"
+          fi
         
       - name: Check for new release
         id: check
@@ -32,6 +86,7 @@ jobs:
             
             REPO_OWNER="egoist"
             REPO_NAME="chatwise-releases"
+            AUR_PACKAGE="chatwise"
             
             echo "🔍 Checking for new releases..."
             
@@ -39,23 +94,31 @@ jobs:
             LATEST_VERSION=$(echo "$LATEST_RELEASE" | jq -r '.tag_name' | sed 's/^v//')
             
             if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
-                echo "❌ Error: No se pudo obtener la última versión"
+                echo "❌ Error: Could not get latest version from GitHub"
                 exit 1
             fi
             
-            echo "📦 Última versión en GitHub: $LATEST_VERSION"
+            echo "📦 Latest version on GitHub: $LATEST_VERSION"
             
-            CURRENT_VERSION=$(grep "^pkgver=" PKGBUILD | cut -d'=' -f2)
-            echo "📦 Versión actual en AUR: $CURRENT_VERSION"
+            echo "🔍 Querying current version on AUR..."
+            AUR_INFO=$(curl -s "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=${AUR_PACKAGE}")
+            CURRENT_VERSION=$(echo "$AUR_INFO" | jq -r '.results[0].Version' | cut -d'-' -f1)
+            
+            if [ -z "$CURRENT_VERSION" ] || [ "$CURRENT_VERSION" == "null" ]; then
+                echo "❌ Error: Could not get current AUR version"
+                exit 1
+            fi
+            
+            echo "📦 Current version on AUR: $CURRENT_VERSION"
             
             if [ "$LATEST_VERSION" == "$CURRENT_VERSION" ]; then
-                echo "✅ El paquete ya está actualizado"
+                echo "✅ Package is already up to date"
                 echo "update_needed=false" >> $GITHUB_OUTPUT
                 exit 0
             fi
             
-            echo "🚀 Nueva versión detectada: $LATEST_VERSION"
-            echo "📥 Descargando para obtener checksum..."
+            echo "🚀 New version detected: $LATEST_VERSION"
+            echo "📥 Downloading to get checksum..."
             
             DEB_URL="https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${LATEST_VERSION}/ChatWise_${LATEST_VERSION}_amd64.deb"
             DEB_FILE="ChatWise_${LATEST_VERSION}_amd64.deb"
@@ -63,11 +126,11 @@ jobs:
             wget -q "$DEB_URL" -O "$DEB_FILE"
             
             if [ ! -f "$DEB_FILE" ]; then
-                echo "❌ Error: No se pudo descargar el archivo .deb"
+                echo "❌ Error: Could not download .deb file"
                 exit 1
             fi
             
-            echo "🔐 Calculando checksum..."
+            echo "🔐 Calculating checksum..."
             NEW_SHA256=$(sha256sum "$DEB_FILE" | awk '{print $1}')
             echo "SHA256: $NEW_SHA256"
             
