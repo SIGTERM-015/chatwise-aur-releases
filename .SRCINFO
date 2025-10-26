@@ -17,7 +17,7 @@ pkgbase = chatwise
 	depends = libappindicator-gtk3
 	options = !strip
 	options = !debug
-	source = https://gh-releases.chatwise.app/egoist/chatwise-releases/v0.9.40/ChatWise_0.9.40_amd64.deb
+	source = https://gh-releases.chatwise.app/egoist/chatwise-releases/v0.9.40/ChatWise_0.9.40_amd64_linux.deb
 	sha256sums = ec4393c1df0f7203907dd95976a4cba23431d237f35209d849314e427f95d1ff
 
 pkgname = chatwise
