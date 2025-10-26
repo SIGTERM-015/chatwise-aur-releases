@@ -120,7 +120,7 @@ jobs:
             echo "🚀 New version detected: $LATEST_VERSION"
             echo "📥 Downloading to get checksum..."
             
-            DEB_URL="https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${LATEST_VERSION}/ChatWise_${LATEST_VERSION}_amd64.deb"
+            DEB_URL="https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${LATEST_VERSION}/ChatWise_${LATEST_VERSION}_amd64_linux.deb"
             DEB_FILE="ChatWise_${LATEST_VERSION}_amd64.deb"
             
             wget -q "$DEB_URL" -O "$DEB_FILE"
