@@ -11,6 +11,14 @@ on:
         description: 'SHA256 checksum of the .deb file'
         required: true
         type: string
+      deb_filename:
+        description: 'Name of the .deb file'
+        required: false
+        type: string
+      source_url:
+        description: 'Download URL for the .deb file'
+        required: false
+        type: string
   workflow_call:
     inputs:
       version:
@@ -20,6 +28,14 @@ on:
       sha256:
         description: 'SHA256 checksum of the .deb file'
         required: true
+        type: string
+      deb_filename:
+        description: 'Name of the .deb file'
+        required: false
+        type: string
+      source_url:
+        description: 'Download URL for the .deb file'
+        required: false
         type: string
 
 permissions:
@@ -81,6 +97,8 @@ jobs:
         env:
           NEW_VERSION: ${{ inputs.version }}
           NEW_SHA256: ${{ inputs.sha256 }}
+          DEB_FILENAME: ${{ inputs.deb_filename }}
+          SOURCE_URL: ${{ inputs.source_url }}
         run: |
           set -e
           
@@ -89,9 +107,28 @@ jobs:
           PACKAGE_NAME="chatwise"
           AUR_REPO="ssh://aur@aur.archlinux.org/chatwise.git"
           
+          # Determine the source URL to use
+          if [ -n "$SOURCE_URL" ]; then
+            FINAL_SOURCE_URL="$SOURCE_URL"
+            echo "📝 Using detected source URL: $FINAL_SOURCE_URL"
+          elif [ -n "$DEB_FILENAME" ]; then
+            # Fallback: construct URL with detected filename
+            FINAL_SOURCE_URL="https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${NEW_VERSION}/${DEB_FILENAME}"
+            echo "📝 Constructed source URL from filename: $FINAL_SOURCE_URL"
+          else
+            # Last resort: use old pattern (backward compatibility)
+            FINAL_SOURCE_URL="https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${NEW_VERSION}/ChatWise_${NEW_VERSION}_amd64.deb"
+            echo "⚠️  Using fallback source URL pattern: $FINAL_SOURCE_URL"
+          fi
+          
           echo "📝 Updating PKGBUILD to version ${NEW_VERSION}..."
           sed -i "s/^pkgver=.*/pkgver=${NEW_VERSION}/" PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          
+          # Update source URL in PKGBUILD - handle both quoted patterns
+          sed -i "s|^source=(\"https://.*\")$|source=(\"${FINAL_SOURCE_URL}\")|" PKGBUILD
+          sed -i "s|^source=(\"https://.*|source=(\"${FINAL_SOURCE_URL}\")|" PKGBUILD
+          
           sed -i "s/^sha256sums=.*/sha256sums=('${NEW_SHA256}')/" PKGBUILD
           
           echo "📝 Updating .SRCINFO version fields..."
@@ -100,7 +137,7 @@ jobs:
           # Update pkgrel
           sed -i "s/^\tpkgrel = .*/\tpkgrel = 1/" .SRCINFO
           # Update source URL
-          sed -i "s|^\tsource = .*|\tsource = https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${NEW_VERSION}/ChatWise_${NEW_VERSION}_amd64.deb|" .SRCINFO
+          sed -i "s|^\tsource = .*|\tsource = ${FINAL_SOURCE_URL}|" .SRCINFO
           # Update sha256sums
           sed -i "s/^\tsha256sums = .*/\tsha256sums = ${NEW_SHA256}/" .SRCINFO
           

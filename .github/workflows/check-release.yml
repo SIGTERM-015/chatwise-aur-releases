@@ -15,6 +15,8 @@ jobs:
       update_needed: ${{ steps.check.outputs.update_needed }}
       version: ${{ steps.check.outputs.version }}
       sha256: ${{ steps.check.outputs.sha256 }}
+      deb_filename: ${{ steps.check.outputs.deb_filename }}
+      source_url: ${{ steps.check.outputs.source_url }}
     
     steps:
       - name: Checkout repository
@@ -32,8 +34,8 @@ jobs:
           LOCAL_VERSION=$(grep "^pkgver=" PKGBUILD | cut -d'=' -f2)
           echo "📦 Local version: $LOCAL_VERSION"
           
-          # Get AUR version
-          AUR_INFO=$(curl -s "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=${AUR_PACKAGE}")
+          # Get AUR version with retry logic
+          AUR_INFO=$(curl -s --retry 3 --retry-delay 5 --retry-all-errors "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=${AUR_PACKAGE}")
           AUR_VERSION=$(echo "$AUR_INFO" | jq -r '.results[0].Version' | cut -d'-' -f1)
           
           if [ -z "$AUR_VERSION" ] || [ "$AUR_VERSION" == "null" ]; then
@@ -90,7 +92,7 @@ jobs:
             
             echo "🔍 Checking for new releases..."
             
-            LATEST_RELEASE=$(curl -s "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest")
+            LATEST_RELEASE=$(curl -s --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest")
             LATEST_VERSION=$(echo "$LATEST_RELEASE" | jq -r '.tag_name' | sed 's/^v//')
             
             if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
@@ -101,7 +103,7 @@ jobs:
             echo "📦 Latest version on GitHub: $LATEST_VERSION"
             
             echo "🔍 Querying current version on AUR..."
-            AUR_INFO=$(curl -s "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=${AUR_PACKAGE}")
+            AUR_INFO=$(curl -s --retry 3 --retry-delay 5 --retry-all-errors "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=${AUR_PACKAGE}")
             CURRENT_VERSION=$(echo "$AUR_INFO" | jq -r '.results[0].Version' | cut -d'-' -f1)
             
             if [ -z "$CURRENT_VERSION" ] || [ "$CURRENT_VERSION" == "null" ]; then
@@ -118,27 +120,44 @@ jobs:
             fi
             
             echo "🚀 New version detected: $LATEST_VERSION"
-            echo "📥 Downloading to get checksum..."
             
-            DEB_URL="https://gh-releases.chatwise.app/${REPO_OWNER}/${REPO_NAME}/v${LATEST_VERSION}/ChatWise_${LATEST_VERSION}_amd64_linux.deb"
-            DEB_FILE="ChatWise_${LATEST_VERSION}_amd64.deb"
+            echo "🔍 Detecting correct .deb filename from release assets..."
+            # Match files ending in .deb but NOT .deb.sig (exclude signature files)
+            DEB_ASSET=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | test("amd64.*\\.deb$") and (.name | endswith(".deb.sig") | not)) | .name' | head -n1)
             
-            wget -q "$DEB_URL" -O "$DEB_FILE"
+            if [ -z "$DEB_ASSET" ] || [ "$DEB_ASSET" == "null" ]; then
+                echo "❌ Error: Could not find amd64 .deb asset in release"
+                exit 1
+            fi
             
-            if [ ! -f "$DEB_FILE" ]; then
+            echo "📦 Found .deb file: $DEB_ASSET"
+            
+            # Extract browser_download_url from release assets (excluding .sig files)
+            DEB_DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "'"$DEB_ASSET"'") | .browser_download_url')
+            
+            echo "📥 Downloading from: $DEB_DOWNLOAD_URL"
+            wget -q "$DEB_DOWNLOAD_URL" -O "$DEB_ASSET"
+            
+            if [ ! -f "$DEB_ASSET" ]; then
                 echo "❌ Error: Could not download .deb file"
                 exit 1
             fi
             
             echo "🔐 Calculating checksum..."
-            NEW_SHA256=$(sha256sum "$DEB_FILE" | awk '{print $1}')
+            NEW_SHA256=$(sha256sum "$DEB_ASSET" | awk '{print $1}')
             echo "SHA256: $NEW_SHA256"
             
-            rm "$DEB_FILE"
+            # Construct the source URL (use browser_download_url as base)
+            SOURCE_URL="$DEB_DOWNLOAD_URL"
+            echo "📝 Source URL: $SOURCE_URL"
+            
+            rm "$DEB_ASSET"
             
             echo "update_needed=true" >> $GITHUB_OUTPUT
             echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
             echo "sha256=$NEW_SHA256" >> $GITHUB_OUTPUT
+            echo "deb_filename=$DEB_ASSET" >> $GITHUB_OUTPUT
+            echo "source_url=$SOURCE_URL" >> $GITHUB_OUTPUT
           
   call-update-workflow:
     needs: check-release
@@ -149,5 +168,7 @@ jobs:
     with:
       version: ${{ needs.check-release.outputs.version }}
       sha256: ${{ needs.check-release.outputs.sha256 }}
+      deb_filename: ${{ needs.check-release.outputs.deb_filename }}
+      source_url: ${{ needs.check-release.outputs.source_url }}
     secrets: inherit
 
