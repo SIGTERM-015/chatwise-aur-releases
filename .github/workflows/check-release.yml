@@ -93,6 +93,14 @@ jobs:
             echo "🔍 Checking for new releases..."
             
             LATEST_RELEASE=$(curl -s --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest")
+            
+            # Validate JSON response
+            if ! echo "$LATEST_RELEASE" | jq empty 2>/dev/null; then
+                echo "❌ Error: Invalid JSON response from GitHub API"
+                echo "Response preview: $(echo "$LATEST_RELEASE" | head -c 200)"
+                exit 1
+            fi
+            
             LATEST_VERSION=$(echo "$LATEST_RELEASE" | jq -r '.tag_name' | sed 's/^v//')
             
             if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
@@ -122,11 +130,30 @@ jobs:
             echo "🚀 New version detected: $LATEST_VERSION"
             
             echo "🔍 Detecting correct .deb filename from release assets..."
+            
+            # Check if assets exist
+            ASSETS_COUNT=$(echo "$LATEST_RELEASE" | jq '.assets | length' 2>/dev/null)
+            if [ -z "$ASSETS_COUNT" ] || [ "$ASSETS_COUNT" == "null" ] || [ "$ASSETS_COUNT" == "0" ]; then
+                echo "❌ Error: No assets found in release"
+                exit 1
+            fi
+            
+            echo "📦 Found $ASSETS_COUNT assets in release"
+            
             # Match files ending in .deb but NOT .deb.sig (exclude signature files)
-            DEB_ASSET=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name | test("amd64.*\\.deb$") and (.name | endswith(".deb.sig") | not)) | .name' | head -n1)
+            DEB_ASSET=$(echo "$LATEST_RELEASE" | jq -r '
+              .assets[] | 
+              select(.name | type == "string") |
+              select(.name | contains("amd64")) |
+              select(.name | endswith(".deb")) |
+              select(.name | endswith(".deb.sig") | not) |
+              .name
+            ' | head -n1)
             
             if [ -z "$DEB_ASSET" ] || [ "$DEB_ASSET" == "null" ]; then
                 echo "❌ Error: Could not find amd64 .deb asset in release"
+                echo "Available assets:"
+                echo "$LATEST_RELEASE" | jq -r '.assets[].name' || echo "Failed to list assets"
                 exit 1
             fi
             
