@@ -86,29 +86,28 @@ jobs:
           command: |
             set -e
             
-            REPO_OWNER="egoist"
-            REPO_NAME="chatwise-releases"
             AUR_PACKAGE="chatwise"
+            RELEASES_URL="https://releases.chatwise.app/releases"
             
             echo "🔍 Checking for new releases..."
             
-            LATEST_RELEASE=$(curl -s --retry 3 --retry-delay 5 --retry-all-errors "https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest")
+            RELEASES=$(curl -s --retry 3 --retry-delay 5 --retry-all-errors "$RELEASES_URL")
             
             # Validate JSON response
-            if ! echo "$LATEST_RELEASE" | jq empty 2>/dev/null; then
-                echo "❌ Error: Invalid JSON response from GitHub API"
-                echo "Response preview: $(echo "$LATEST_RELEASE" | head -c 200)"
+            if ! echo "$RELEASES" | jq empty 2>/dev/null; then
+                echo "❌ Error: Invalid JSON response from ChatWise releases API"
+                echo "Response preview: $(echo "$RELEASES" | head -c 200)"
                 exit 1
             fi
             
-            LATEST_VERSION=$(echo "$LATEST_RELEASE" | jq -r '.tag_name' | sed 's/^v//')
+            LATEST_VERSION=$(echo "$RELEASES" | jq -r '.[0].version')
             
             if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
-                echo "❌ Error: Could not get latest version from GitHub"
+                echo "❌ Error: Could not get latest version from ChatWise releases API"
                 exit 1
             fi
             
-            echo "📦 Latest version on GitHub: $LATEST_VERSION"
+            echo "📦 Latest version on ChatWise releases API: $LATEST_VERSION"
             
             echo "🔍 Querying current version on AUR..."
             AUR_INFO=$(curl -s --retry 3 --retry-delay 5 --retry-all-errors "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=${AUR_PACKAGE}")
@@ -121,6 +120,14 @@ jobs:
             
             echo "📦 Current version on AUR: $CURRENT_VERSION"
             
+            HIGHER_VERSION=$(printf "%s\n%s" "$CURRENT_VERSION" "$LATEST_VERSION" | sort -V | tail -n1)
+            
+            if [ "$LATEST_VERSION" != "$HIGHER_VERSION" ]; then
+                echo "✅ AUR version ($CURRENT_VERSION) is newer than release feed ($LATEST_VERSION), skipping"
+                echo "update_needed=false" >> $GITHUB_OUTPUT
+                exit 0
+            fi
+            
             if [ "$LATEST_VERSION" == "$CURRENT_VERSION" ]; then
                 echo "✅ Package is already up to date"
                 echo "update_needed=false" >> $GITHUB_OUTPUT
@@ -132,7 +139,7 @@ jobs:
             echo "🔍 Detecting correct .deb filename from release assets..."
             
             # Check if assets exist
-            ASSETS_COUNT=$(echo "$LATEST_RELEASE" | jq '.assets | length' 2>/dev/null)
+            ASSETS_COUNT=$(echo "$RELEASES" | jq '.[0].assets | length' 2>/dev/null)
             if [ -z "$ASSETS_COUNT" ] || [ "$ASSETS_COUNT" == "null" ] || [ "$ASSETS_COUNT" == "0" ]; then
                 echo "❌ Error: No assets found in release"
                 exit 1
@@ -140,27 +147,18 @@ jobs:
             
             echo "📦 Found $ASSETS_COUNT assets in release"
             
-            # Match files ending in .deb but NOT .deb.sig (exclude signature files)
-            DEB_ASSET=$(echo "$LATEST_RELEASE" | jq -r '
-              .assets[] | 
-              select(.name | type == "string") |
-              select(.name | contains("amd64")) |
-              select(.name | endswith(".deb")) |
-              select(.name | endswith(".deb.sig") | not) |
-              .name
-            ' | head -n1)
+            DEB_ASSET=$(echo "$RELEASES" | jq -r '.[0].assets[] | select(.name | endswith(".deb")) | .name' | head -n1)
             
             if [ -z "$DEB_ASSET" ] || [ "$DEB_ASSET" == "null" ]; then
-                echo "❌ Error: Could not find amd64 .deb asset in release"
+                echo "❌ Error: Could not find .deb asset in release"
                 echo "Available assets:"
-                echo "$LATEST_RELEASE" | jq -r '.assets[].name' || echo "Failed to list assets"
+                echo "$RELEASES" | jq -r '.[0].assets[].name' || echo "Failed to list assets"
                 exit 1
             fi
             
             echo "📦 Found .deb file: $DEB_ASSET"
             
-            # Extract browser_download_url from release assets (excluding .sig files)
-            DEB_DOWNLOAD_URL=$(echo "$LATEST_RELEASE" | jq -r '.assets[] | select(.name == "'"$DEB_ASSET"'") | .browser_download_url')
+            DEB_DOWNLOAD_URL=$(echo "$RELEASES" | jq -r '.[0].assets[] | select(.name == "'"$DEB_ASSET"'") | .url')
             
             echo "📥 Downloading from: $DEB_DOWNLOAD_URL"
             wget -q "$DEB_DOWNLOAD_URL" -O "$DEB_ASSET"
@@ -174,7 +172,6 @@ jobs:
             NEW_SHA256=$(sha256sum "$DEB_ASSET" | awk '{print $1}')
             echo "SHA256: $NEW_SHA256"
             
-            # Construct the source URL (use browser_download_url as base)
             SOURCE_URL="$DEB_DOWNLOAD_URL"
             echo "📝 Source URL: $SOURCE_URL"
             
@@ -198,4 +195,3 @@ jobs:
       deb_filename: ${{ needs.check-release.outputs.deb_filename }}
       source_url: ${{ needs.check-release.outputs.source_url }}
     secrets: inherit
-
